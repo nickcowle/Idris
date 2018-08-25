@@ -1,7 +1,6 @@
 import Data.Fin
 import Data.Seq
 import Data.Vect
-import SumsTo
 
 -- Switch the row and column type from List to Vect 9
 
@@ -15,12 +14,12 @@ CompleteRow : Type
 CompleteRow = Vect 9 Tile
 
 data BoardZipper : Type where
-  MkBoard : SumsTo a b 8 ->
-            SumsTo c d 9 ->
-            Vect a CompleteRow ->
-            Vect c Tile ->
-            Vect d (Maybe Tile) ->
-            Vect b PartialRow ->
+  MkBoard : (partialRowCount + completeRowCount = 8) ->
+            (partialTileCount + completeTileCount = 9) ->
+            Vect completeRowCount CompleteRow ->
+            Vect completeTileCount Tile ->
+            Vect partialTileCount (Maybe Tile) ->
+            Vect partialRowCount PartialRow ->
             BoardZipper
 
 PartialBoard : Type
@@ -45,27 +44,30 @@ rowsValid = all tilesDistinct
 isValid : PartialBoard -> Bool
 isValid board = rowsValid board && rowsValid (transpose board) && rowsValid (squares board)
 
-mapAndAppend : (a -> b) -> Vect n a -> Vect m b -> Vect (n + m) b
-mapAndAppend f [] ys = ys
+mapAndAppend : (a -> b) -> Vect n a -> Vect m b -> Vect (m + n) b
+mapAndAppend {m} f [] ys = rewrite plusZeroRightNeutral m in ys
 mapAndAppend {n = S k} {m} f (x :: xs) ys =
-  rewrite plusSuccRightSucc k m in mapAndAppend f xs (f x :: ys)
+  rewrite sym $ plusSuccRightSucc m k in mapAndAppend f xs (f x :: ys)
 
 toPartialBoard : BoardZipper -> PartialBoard
 toPartialBoard (MkBoard s1 s2 crs cr pr prs) =
   let pr = mapAndAppend Just cr pr in
-  let pr = replace {P=\n => Vect n $ Maybe Tile} (sumEq s2) pr in
+  let pr = replace {P=\n => Vect n $ Maybe Tile} s2 pr in
   let prs = mapAndAppend (map Just) crs (pr :: prs) in
-  replace {P=\n => Vect n $ Vect 9 $ Maybe Tile} (sumEq $ sumSuccRight s1) prs
+  replace {P=\n => Vect n $ Vect 9 $ Maybe Tile} (cong s1) prs
+
+sumSuccRightSucc : (S a + b = c) -> (a + S b = c)
+sumSuccRightSucc = trans $ sym $ plusSuccRightSucc _ _
 
 solveBoard : BoardZipper -> Seq CompleteBoard
-solveBoard (MkBoard s1 s2 crs cr [] []) with (leftIsSum s1, leftIsSum s2)
+solveBoard (MkBoard s1 s2 crs cr [] []) with (s1, s2)
   | (Refl, Refl) = [ reverse $ reverse cr :: crs ]
-solveBoard (MkBoard s1 s2 crs cr [] (pr :: prs)) with (leftIsSum s2)
-  | Refl = solveBoard (MkBoard (sumSuccLeftSucc s1) (MkSumsTo 0 9) (reverse cr :: crs) [] pr prs)
+solveBoard (MkBoard s1 s2 crs cr [] (pr :: prs)) with (s2)
+  | Refl = solveBoard (MkBoard (sumSuccRightSucc s1) Refl (reverse cr :: crs) [] pr prs)
 solveBoard (MkBoard s1 s2 crs cr (Just i :: pr) prs) =
-  solveBoard (MkBoard s1 (sumSuccLeftSucc s2) crs (i :: cr) pr prs)
+  solveBoard (MkBoard s1 (sumSuccRightSucc s2) crs (i :: cr) pr prs)
 solveBoard (MkBoard s1 s2 crs cr (Nothing :: pr) prs) =
-  concat $ map solveBoard $ filter (isValid . toPartialBoard) $ map (\i => MkBoard s1 (sumSuccLeftSucc s2) crs (i :: cr) pr prs) $ fins 9
+  concat $ map solveBoard $ filter (isValid . toPartialBoard) $ map (\i => MkBoard s1 (sumSuccRightSucc s2) crs (i :: cr) pr prs) $ fins 9
 
 -- Parsing and printing
 
@@ -81,7 +83,7 @@ toVect n xs with (exactLength n $ fromList xs)
 
 parseBoard : String -> BoardZipper
 parseBoard s with (toVect 9 $ map (toVect 9 . map parseTile . unpack) $ lines s)
-  | (pr::prs) = MkBoard (MkSumsTo 0 8) (MkSumsTo 0 9) [] [] pr prs
+  | (pr::prs) = MkBoard Refl Refl [] [] pr prs
 
 printTile : Maybe Tile -> Char
 printTile Nothing = ' '
